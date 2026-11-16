@@ -43,6 +43,7 @@ export function attachInput(input, canvas) {
     if (event.code === 'Digit3') input.pressed.add('choice3');
     if (event.code === 'Enter') input.pressed.add('confirm');
     if (event.code === 'KeyR') input.pressed.add('restart');
+    if (event.code === 'KeyE') input.pressed.add('endless');
     if (event.code === 'KeyM') input.pressed.add('mute');
   });
   window.addEventListener('keyup', (event) => {

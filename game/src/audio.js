@@ -46,6 +46,8 @@ export const SOUNDS = {
   masterpiece(audio) { [523, 659, 784, 1046].forEach((f, i) => setTimeout(() => tone(audio, f, 0.22, 'triangle', 0.15), i * 90)); },
   surge(audio) { tone(audio, 220, 0.3, 'sawtooth', 0.1, 440); setTimeout(() => tone(audio, 220, 0.3, 'sawtooth', 0.1, 440), 320); },
   dash(audio) { tone(audio, 300, 0.14, 'sine', 0.09, 700); },
+  bossdown(audio) { tone(audio, 140, 0.5, 'sawtooth', 0.16, 50); setTimeout(() => tone(audio, 392, 0.3, 'triangle', 0.14), 240); setTimeout(() => tone(audio, 523, 0.4, 'triangle', 0.14), 420); },
+  victory(audio) { [392, 523, 659, 784, 1046].forEach((f, i) => setTimeout(() => tone(audio, f, 0.3, 'triangle', 0.15), i * 120)); },
 };
 
 export function toggleMute(audio) {

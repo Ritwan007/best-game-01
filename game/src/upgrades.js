@@ -1,5 +1,6 @@
 // The three-upgrade choice offered after every wave. Each one changes the
 // keeper, the kiln or the sparks in a way the player can feel at once.
+// Once per wave break the choice may be REROLLED for 5 embers.
 export const UPGRADES = [
   { id: 'bellows', name: 'Great Bellows', desc: 'Embers feed +6 heat each. The kiln burns hotter, longer.', apply: (u) => { u.emberBonus = (u.emberBonus ?? 0) + 6; } },
   { id: 'twin', name: 'Twin Tongs', desc: 'Throw two sparks at once, slightly spread. Twice the bite.', apply: (u) => { u.twin = true; } },
@@ -27,4 +28,28 @@ export function rollChoices(random, upgrades) {
     choices.push(pool.splice(index, 1)[0]);
   }
   return choices;
+}
+
+export const REROLL_COST = 5;
+
+/** A reroll is available once per wave break, for REROLL_COST banked embers. */
+export function canReroll(state) {
+  return !state.rerollUsed && (state.embers || 0) >= REROLL_COST;
+}
+
+/**
+ * Spend the embers and roll a fresh choice set, preferring one that differs
+ * from the current set. Returns the new choices, or null when no reroll is
+ * available (already used this break, or too few embers).
+ */
+export function rerollChoices(state, current) {
+  if (!canReroll(state)) return null;
+  state.embers -= REROLL_COST;
+  state.embersSpent = (state.embersSpent || 0) + REROLL_COST;
+  state.rerollUsed = true;
+  let next = rollChoices(state.random, state.upgrades);
+  for (let i = 0; i < 4 && next.length > 0 && next.every((c) => current.some((o) => o.id === c.id)); i += 1) {
+    next = rollChoices(state.random, state.upgrades);
+  }
+  return next;
 }

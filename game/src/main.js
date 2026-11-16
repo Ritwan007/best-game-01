@@ -1,12 +1,17 @@
 // Kilnfire entry point: wires input, world, renderer and audio together, runs
-// the fixed-step loop, and owns the four screens (title, play, upgrade, over).
-// ?shot=title|play|upgrade|end&seed=N renders one screenshot scene instead.
+// the fixed-step loop, and owns the five screens (title, play, upgrade,
+// victory, over) plus the campaign flow between them — difficulty choice,
+// the upgrade reroll, victory, and the endless firing after it.
+// ?shot=title|play|boss|victory|upgrade|end&seed=N renders one scene instead.
 import { FIELD, STEP } from './config.js';
-import { createWorld, stepWorld, nextWave, EVENT_OVER, EVENT_FIRED, EVENT_HIT, EVENT_VENT, EVENT_PICKUP, EVENT_SHOOT, EVENT_WAVE, EVENT_COMBO, EVENT_MASTERPIECE, EVENT_SURGE, EVENT_DASH } from './world.js';
-import { emptyUpgrades, rollChoices } from './upgrades.js';
+import { createWorld, stepWorld, nextWave, EVENT_OVER, EVENT_FIRED, EVENT_HIT, EVENT_VENT, EVENT_PICKUP, EVENT_SHOOT, EVENT_WAVE, EVENT_COMBO, EVENT_MASTERPIECE, EVENT_SURGE, EVENT_DASH, EVENT_BOSS, EVENT_BOSS_DOWN, EVENT_VICTORY } from './world.js';
+import { emptyUpgrades, rollChoices, rerollChoices } from './upgrades.js';
 import { createInput, attachInput, consumePress, clearPresses } from './input.js';
-import { drawWorld, drawTitle, drawUpgrade, drawOver, SCREEN_TITLE, SCREEN_PLAY, SCREEN_UPGRADE, SCREEN_OVER } from './render.js';
+import { drawWorld, SCREEN_TITLE, SCREEN_PLAY, SCREEN_UPGRADE, SCREEN_OVER, SCREEN_VICTORY } from './render.js';
+import { drawTitle, drawUpgrade, drawOver, drawVictory } from './screens.js';
 import { createAudio, SOUNDS, toggleMute } from './audio.js';
+import { loadBest, saveBest, saveBestFiring } from './saves.js';
+import { runStats } from './campaign.js';
 import { shotScene } from './shots.js';
 
 const canvas = document.getElementById('game');
@@ -22,29 +27,29 @@ attachInput(input, canvas);
 const audio = createAudio();
 
 let screen = SCREEN_TITLE;
-let state = createWorld(seed);
+let difficultyId = 'stoker';
+let state = createWorld(seed, difficultyId);
 state.upgrades = emptyUpgrades();
 let choices = [];
-let best = 0;
-try { best = Number(window.localStorage.getItem('kilnfire-best') || 0) || 0; } catch { best = 0; }
+let best = loadBest();
 
 function setStatus(text) {
   if (status) status.textContent = text;
 }
 
 function startGame() {
-  state = createWorld((seed + Date.now()) % 2147483647);
+  state = createWorld((seed + Date.now()) % 2147483647, difficultyId);
   state.upgrades = emptyUpgrades();
   screen = SCREEN_PLAY;
   SOUNDS.click(audio);
-  setStatus('Kilnfire: feed the kiln, fire the pots, dodge the cold drafts.');
+  setStatus(`Kilnfire: the Great Firing begins on ${state.difficulty.name}. Feed the kiln, fire the pots inside the gold ring.`);
 }
 
 function openUpgrade() {
   choices = rollChoices(state.random, state.upgrades);
   screen = SCREEN_UPGRADE;
   SOUNDS.wave(audio);
-  setStatus(`Wave ${state.wave} complete. Choose one upgrade.`);
+  setStatus(`Wave ${state.wave} complete. Choose one upgrade, or press R to reroll for 5 embers.`);
 }
 
 function pickUpgrade(index) {
@@ -58,15 +63,38 @@ function pickUpgrade(index) {
   setStatus(`Wave ${state.wave}. ${choice.name} chosen.`);
 }
 
+function reroll() {
+  const next = rerollChoices(state, choices);
+  if (!next) { SOUNDS.hit(audio); return; }
+  choices = next;
+  SOUNDS.combo(audio);
+  setStatus('Choices rerolled for 5 embers.');
+}
+
 function gameOver() {
   if (screen === SCREEN_OVER) return;
   screen = SCREEN_OVER;
-  if (state.score > best) {
-    best = state.score;
-    try { window.localStorage.setItem('kilnfire-best', String(best)); } catch { /* storage unavailable */ }
-  }
+  best = saveBest(state.score);
   SOUNDS.over(audio);
   setStatus(`Game over. Final score ${state.score}. Press R to fire again.`);
+}
+
+function victory() {
+  if (screen === SCREEN_VICTORY) return;
+  screen = SCREEN_VICTORY;
+  best = saveBest(state.score);
+  saveBestFiring(runStats(state));
+  SOUNDS.victory(audio);
+  setStatus(`Victory! The Frost Herald falls. Final score ${state.score}. Enter to play again, E for endless firing.`);
+}
+
+function startEndless() {
+  state.won = false;
+  state.endless = true;
+  nextWave(state);
+  screen = SCREEN_PLAY;
+  SOUNDS.wave(audio);
+  setStatus('Endless firing: wave after wave, as long as the kiln burns.');
 }
 
 function handleEvents() {
@@ -80,7 +108,10 @@ function handleEvents() {
     else if (event === EVENT_MASTERPIECE) SOUNDS.masterpiece(audio);
     else if (event === EVENT_SURGE) SOUNDS.surge(audio);
     else if (event === EVENT_DASH) SOUNDS.dash(audio);
+    else if (event === EVENT_BOSS) SOUNDS.surge(audio);
+    else if (event === EVENT_BOSS_DOWN) SOUNDS.bossdown(audio);
     else if (event === EVENT_WAVE) openUpgrade();
+    else if (event === EVENT_VICTORY) victory();
     else if (event === EVENT_OVER) gameOver();
   }
   state.events.length = 0;
@@ -110,19 +141,28 @@ function frame(now) {
   if (screen === SCREEN_TITLE) {
     stepWorld(state, { up: false, down: false, left: false, right: false, dash: false, vent: false, firing: false, mouseX: 640, mouseY: 200 }, STEP);
     state.events.length = 0;
+    if (consumePress(input, 'choice1')) difficultyId = 'apprentice';
+    else if (consumePress(input, 'choice2')) difficultyId = 'stoker';
+    else if (consumePress(input, 'choice3')) difficultyId = 'kilnmaster';
     if (consumePress(input, 'confirm') || consumePress(input, 'fire')) startGame();
-    drawTitle(ctx, state, time);
+    drawTitle(ctx, state, time, difficultyId);
   } else if (screen === SCREEN_PLAY) {
     stepWorld(state, input, STEP);
     handleEvents();
     if (state.over) gameOver();
+    if (state.won) victory();
     drawWorld(ctx, state, time);
     if (state.score > best) best = state.score;
   } else if (screen === SCREEN_UPGRADE) {
     if (consumePress(input, 'choice1')) pickUpgrade(0);
     else if (consumePress(input, 'choice2')) pickUpgrade(1);
     else if (consumePress(input, 'choice3')) pickUpgrade(2);
+    else if (consumePress(input, 'restart')) reroll();
     drawUpgrade(ctx, state, choices);
+  } else if (screen === SCREEN_VICTORY) {
+    if (consumePress(input, 'endless')) startEndless();
+    else if (consumePress(input, 'confirm') || consumePress(input, 'restart')) startGame();
+    drawVictory(ctx, state);
   } else if (screen === SCREEN_OVER) {
     if (consumePress(input, 'restart') || consumePress(input, 'confirm')) startGame();
     drawOver(ctx, state);
@@ -142,12 +182,13 @@ if (shot) {
   ctx.setTransform(window.devicePixelRatio, 0, 0, window.devicePixelRatio, 0, 0);
   const scale = Math.min(canvas.width / FIELD.width, canvas.height / FIELD.height) / window.devicePixelRatio;
   ctx.scale(scale, scale);
-  if (screen === SCREEN_TITLE) drawTitle(ctx, state, 1.2);
+  if (screen === SCREEN_TITLE) drawTitle(ctx, state, 1.2, difficultyId);
   else if (screen === SCREEN_UPGRADE) drawUpgrade(ctx, state, choices);
   else if (screen === SCREEN_OVER) drawOver(ctx, state);
+  else if (screen === SCREEN_VICTORY) drawVictory(ctx, state);
   else drawWorld(ctx, state, 19);
   setStatus(`Kilnfire screenshot: ${shot}.`);
 } else {
-  setStatus('Kilnfire: press Enter to start. Feed the kiln, fire the pots.');
+  setStatus('Kilnfire: pick a difficulty, press Enter to start the Great Firing.');
   requestAnimationFrame(frame);
 }

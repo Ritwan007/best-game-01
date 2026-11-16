@@ -25,7 +25,8 @@ export const KEEPER = {
 export const HEARTS = 3;
 
 // Heat: 0..100. Below 20 the kiln is dying (a heart is lost at 0). 55..85 is the
-// gold zone where pots fire. Above 95 the kiln cracks and must be vented.
+// gold band where pots can fire — and only while a pot stands inside the gold
+// zone ring around the kiln (see gold-zone.js). Above 95 the kiln cracks.
 export const HEAT = {
   start: 55,
   drainPerSecond: 0.55,
@@ -67,7 +68,7 @@ export const FROST = {
 };
 
 export const COMBO = { bonusPerStack: 25, maxStack: 8 };
-export const MASTERPIECE = { streak: 3, score: 250 };
+export const MASTERPIECE = { streak: 6, score: 250 };
 export const SURGE = { atSeconds: 12, seconds: 4, firstWave: 2, draftInterval: 0.55 };
 export const PARTICLE_CAP = 420;
 
@@ -87,8 +88,9 @@ export const SPARK = {
   range: 560,
 };
 
-// Clay pots on the drying racks at the yard's edges. A pot fires (scores) after
-// spending enough seconds in the gold zone; a fired pot turns glazed and bright.
+// Clay pots stand on racks in a ring around the kiln (see pot-racks.js). A pot
+// fires (scores) after enough seconds with the heat in the gold band while the
+// pot itself stands inside the gold zone ring; a fired pot turns glazed.
 export const POT = {
   count: 6,
   fireSeconds: 6,
@@ -116,4 +118,22 @@ export const PALETTE = {
   heart: '#ff5d73',
 };
 
-export const SCREENS = { TITLE: 'title', PLAY: 'play', UPGRADE: 'upgrade', OVER: 'over' };
+export const SCREENS = { TITLE: 'title', PLAY: 'play', UPGRADE: 'upgrade', OVER: 'over', VICTORY: 'victory' };
+
+// World events: the world pushes these strings, the entry point turns them
+// into sound and screen changes. They live here so every system module can
+// name them without importing the world (no import cycles).
+export const EVENT_OVER = 'over';
+export const EVENT_WAVE = 'wave';
+export const EVENT_FIRED = 'fired';
+export const EVENT_HIT = 'hit';
+export const EVENT_VENT = 'vent';
+export const EVENT_PICKUP = 'pickup';
+export const EVENT_SHOOT = 'shoot';
+export const EVENT_COMBO = 'combo';
+export const EVENT_MASTERPIECE = 'masterpiece';
+export const EVENT_SURGE = 'surge';
+export const EVENT_DASH = 'dash';
+export const EVENT_BOSS = 'boss';
+export const EVENT_BOSS_DOWN = 'bossdown';
+export const EVENT_VICTORY = 'victory';

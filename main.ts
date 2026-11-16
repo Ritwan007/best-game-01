@@ -4,6 +4,9 @@
 // vendored make.fun library, exactly as the kit's starter does. Outside the
 // grader, MAKEFUN_OUTPUT_DIR stands in for /output:
 //   mkdir -p out && MAKEFUN_OUTPUT_DIR=out node main.ts
+//
+// V3 note: the game is the ten-wave Great Firing campaign (see README.md);
+// the hand-in itself is unchanged in shape — game/, screenshots/, dossier.
 
 import { cpSync, existsSync, mkdirSync, readdirSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -46,6 +49,8 @@ if (countGameEntries(gameDir) > CAPS.game_max_files) fail('game/ holds more than
 mkdirSync(outDir, { recursive: true });
 cpSync(gameDir, join(outDir, 'game'), { recursive: true });
 mkdirSync(join(outDir, 'screenshots'), { recursive: true });
+// The four v3 scenes, in dossier order: title, play, boss, victory.
+const EXPECTED_SHOTS = ['1-start.jpg', '2-play.jpg', '3-boss.jpg', '4-victory.jpg'];
 const shotsDir = join(root, 'screenshots');
 if (existsSync(shotsDir)) {
   for (const name of readdirSync(shotsDir)) {
@@ -56,8 +61,12 @@ if (existsSync(shotsDir)) {
   }
 }
 
+for (const name of EXPECTED_SHOTS) {
+  if (!existsSync(join(shotsDir, name))) fail(`screenshot ${name} is missing`);
+}
+
 // buildDossier reads game/ and screenshots/ out of the output directory and
 // writes the summary the judge reads; the scorer rebuilds it and compares
 // the two byte for byte, so nothing here may add or drop a file afterwards.
 writeFileSync(join(outDir, 'dossier.json'), buildDossier(outDir, CAPS));
-console.log(`Kilnfire handed in: game/ + screenshots/ + dossier.json in ${outDir}`);
+console.log(`Kilnfire v3 handed in: game/ + ${EXPECTED_SHOTS.length} screenshots + dossier.json in ${outDir}`);

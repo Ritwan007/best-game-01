@@ -1,46 +1,47 @@
-// Kilnfire world: pure game logic, no canvas and no audio, so it can be driven
-// headlessly in tests. A state is created by createWorld(seed), stepped by
-// stepWorld(state, input, dt), and read by the renderer and the screenshots.
-import { FIELD, KILN, STEP, WAVE_SECONDS, KEEPER, HEARTS, HEAT, EMBER, DRAFT, IMP, FROST, COMBO, MASTERPIECE, SURGE, PARTICLE_CAP, SPARK, POT } from './config.js';
+// Kilnfire world: the simulation orchestrator. Pure game logic, no canvas and
+// no audio, so it can be driven headlessly in tests. The systems live in
+// their own modules — keeper, gold-zone, combo, masterpiece, draft-surge,
+// frost-wraiths, boss, campaign, difficulties, particles, pot-racks — and
+// this file wires them into one fixed-step world.
+import { FIELD, KILN, STEP, WAVE_SECONDS, KEEPER, HEARTS, HEAT, EMBER, DRAFT, IMP, FROST, SPARK, POT, EVENT_OVER, EVENT_WAVE, EVENT_VENT, EVENT_PICKUP, EVENT_SHOOT, EVENT_BOSS, EVENT_VICTORY } from './config.js';
 import { makeRandom, range } from './random.js';
+import { burst, floater, stepParticles } from './particles.js';
+import { createKeeper, stepKeeper, hurtKeeper } from './keeper.js';
+import { createPots, RACKS } from './pot-racks.js';
+import { heatInGoldBand, potCanFire } from './gold-zone.js';
+import { registerPotFired, resetCombo } from './combo.js';
+import { maybeMasterpiece } from './masterpiece.js';
+import { stepSurge } from './draft-surge.js';
+import { spawnFrost, stepFrosts, KIND_FROST } from './frost-wraiths.js';
+import { createBoss, stepBoss, damageBoss } from './boss.js';
+import { isBossWave } from './campaign.js';
+import { difficultyById } from './difficulties.js';
 
+export { EVENT_OVER, EVENT_WAVE, EVENT_VENT, EVENT_PICKUP, EVENT_SHOOT, EVENT_BOSS, EVENT_VICTORY };
+export { EVENT_FIRED, EVENT_HIT, EVENT_COMBO, EVENT_MASTERPIECE, EVENT_SURGE, EVENT_DASH, EVENT_BOSS_DOWN } from './config.js';
+export { RACKS };
 export const KIND_EMBER = 'ember';
 export const KIND_DRAFT = 'draft';
 export const KIND_IMP = 'imp';
-export const KIND_FROST = 'frost';
-export const KIND_SPARK = 'spark';
-export const EVENT_OVER = 'over';
-export const EVENT_WAVE = 'wave';
-export const EVENT_FIRED = 'fired';
-export const EVENT_HIT = 'hit';
-export const EVENT_VENT = 'vent';
-export const EVENT_PICKUP = 'pickup';
-export const EVENT_SHOOT = 'shoot';
-export const EVENT_COMBO = 'combo';
-export const EVENT_MASTERPIECE = 'masterpiece';
-export const EVENT_SURGE = 'surge';
-export const EVENT_DASH = 'dash';
+export { KIND_FROST };
 
-const RACKS = [
-  { x: 96, y: 120 }, { x: 96, y: 360 }, { x: 96, y: 600 },
-  { x: 1184, y: 120 }, { x: 1184, y: 360 }, { x: 1184, y: 600 },
-];
-
-export function createWorld(seed) {
+export function createWorld(seed, difficultyId = 'stoker') {
   const random = makeRandom(seed);
   const state = {
     seed,
     random,
+    difficulty: difficultyById(difficultyId),
     time: 0,
     wave: 1,
     waveTime: 0,
     score: 0,
     embers: 0,
+    embersSpent: 0,
     potsFired: 0,
     hearts: HEARTS,
     heat: HEAT.start,
     overheatSeconds: 0,
-    keeper: { x: 640, y: 560, vx: 0, vy: 0, aim: -Math.PI / 2, dashTime: 0, dashCooldown: 0, invulnerable: 0, moving: false },
+    keeper: createKeeper(),
     sparks: [],
     items: [],
     drafts: [],
@@ -48,7 +49,7 @@ export function createWorld(seed) {
     frosts: [],
     particles: [],
     floaters: [],
-    pots: RACKS.map((rack) => ({ x: rack.x, y: rack.y, progress: 0, fired: false })),
+    pots: createPots(),
     emberTimer: 0.4,
     draftTimer: 3.0,
     impTimer: 8,
@@ -60,7 +61,13 @@ export function createWorld(seed) {
     surgeDone: false,
     surgeLeft: 0,
     mpWave: false,
-    banner: 'FIRE THE POTS! Keep heat 55-85 - grab embers, vent with SPACE',
+    boss: null,
+    coldFront: false,
+    won: false,
+    campaignDone: false,
+    endless: false,
+    rerollUsed: false,
+    banner: 'FIRE THE POTS! Keep heat 55-85 and pots inside the GOLD RING',
     bannerTime: 5,
     hintStage: 0,
     flash: 0,
@@ -112,76 +119,6 @@ function spawnImp(state) {
   state.imps.push({ kind: KIND_IMP, x, y, radius: IMP.radius, hp: 2, active: true });
 }
 
-function spawnFrost(state) {
-  const edge = Math.floor(state.random() * 4);
-  let x = 60; let y = 60;
-  if (edge === 0) { x = range(state.random, 60, FIELD.width - 60); y = 46; }
-  if (edge === 1) { x = range(state.random, 60, FIELD.width - 60); y = FIELD.height - 46; }
-  if (edge === 2) { x = 46; y = range(state.random, 60, FIELD.height - 60); }
-  if (edge === 3) { x = FIELD.width - 46; y = range(state.random, 60, FIELD.height - 60); }
-  state.frosts.push({ kind: KIND_FROST, x, y, radius: FROST.radius, hp: 1, active: true, phase: state.random() * Math.PI * 2 });
-}
-
-function burst(state, x, y, colour, count, speed) {
-  if (state.particles.length > PARTICLE_CAP) state.particles.splice(0, state.particles.length - PARTICLE_CAP);
-  for (let i = 0; i < count; i += 1) {
-    const angle = state.random() * Math.PI * 2;
-    const v = speed * (0.4 + state.random() * 0.8);
-    state.particles.push({ x, y, vx: Math.cos(angle) * v, vy: Math.sin(angle) * v, life: 0.5 + state.random() * 0.4, maxLife: 0.9, colour, size: 2 + state.random() * 4 });
-  }
-}
-
-function floater(state, x, y, text, colour) {
-  state.floaters.push({ x, y, text, colour, life: 1.1 });
-}
-
-function hurtKeeper(state, amount, what) {
-  if (state.keeper.invulnerable > 0 || state.keeper.dashTime > 0 || state.over) return;
-  state.flash = 0.35;
-  state.hearts -= amount;
-  state.keeper.invulnerable = KEEPER.invulnerable;
-  state.shake = 14;
-  state.events.push(EVENT_HIT);
-  floater(state, state.keeper.x, state.keeper.y - 34, what, '#ff5d73');
-  burst(state, state.keeper.x, state.keeper.y, '#ff5d73', 14, 180);
-  if (state.hearts <= 0) {
-    state.hearts = 0;
-    state.over = true;
-    state.events.push(EVENT_OVER);
-  }
-}
-
-function stepKeeper(state, input, dt) {
-  const keeper = state.keeper;
-  let mx = (input.right ? 1 : 0) - (input.left ? 1 : 0);
-  let my = (input.down ? 1 : 0) - (input.up ? 1 : 0);
-  const len = Math.hypot(mx, my);
-  if (len > 0) { mx /= len; my /= len; }
-  keeper.moving = len > 0;
-  if (input.dash && keeper.dashCooldown <= 0 && len > 0) {
-    keeper.dashTime = KEEPER.dashSeconds;
-    keeper.dashCooldown = KEEPER.dashCooldown;
-    state.events.push(EVENT_DASH);
-    burst(state, keeper.x, keeper.y, '#ffd166', 8, 120);
-  }
-  const speed = keeper.dashTime > 0 ? KEEPER.dashSpeed : KEEPER.speed * (state.upgrades?.swift ? 1.18 : 1);
-  keeper.x += mx * speed * dt;
-  keeper.y += my * speed * dt;
-  keeper.x = Math.min(FIELD.width - 30, Math.max(30, keeper.x));
-  keeper.y = Math.min(FIELD.height - 30, Math.max(30, keeper.y));
-  // The kiln is solid: the keeper walks around it.
-  const dk = distance(keeper.x, keeper.y, KILN.x, KILN.y);
-  if (dk < KILN.radius + KEEPER.radius) {
-    const push = (KILN.radius + KEEPER.radius - dk) || 1;
-    keeper.x += ((keeper.x - KILN.x) / (dk || 1)) * push;
-    keeper.y += ((keeper.y - KILN.y) / (dk || 1)) * push;
-  }
-  keeper.aim = Math.atan2(input.mouseY - keeper.y, input.mouseX - keeper.x);
-  if (keeper.dashTime > 0) keeper.dashTime -= dt;
-  if (keeper.dashCooldown > 0) keeper.dashCooldown -= dt;
-  if (keeper.invulnerable > 0) keeper.invulnerable -= dt;
-}
-
 function stepSparks(state, dt) {
   if (state.sparkCooldown > 0) state.sparkCooldown -= dt;
   for (const spark of state.sparks) {
@@ -194,37 +131,18 @@ function stepSparks(state, dt) {
 }
 
 function stepHeat(state, dt) {
-  state.heat -= HEAT.drainPerSecond * dt;
-  const inGold = state.heat >= HEAT.goldLow && state.heat <= HEAT.goldHigh;
-  if (!inGold && state.combo > 0) { state.combo = 0; state.goldStreak = 0; }
+  state.heat -= HEAT.drainPerSecond * state.difficulty.heatDecay * dt;
+  const inGold = heatInGoldBand(state.heat);
+  if (!inGold && state.combo > 0) resetCombo(state);
   if (inGold) {
     for (const pot of state.pots) {
-      if (pot.fired) continue;
+      // The spatial rule: a pot fires only while it stands inside the ring.
+      if (!potCanFire(state, pot)) continue;
       pot.progress += dt * (state.upgrades?.glaze ? 2 : 1) * (state.upgrades?.stoker ? 1.35 : 1);
       if (pot.progress >= POT.fireSeconds) {
         pot.fired = true;
-        state.potsFired += 1;
-        state.combo = Math.min(COMBO.maxStack, state.combo + 1);
-        state.comboMax = Math.max(state.comboMax, state.combo);
-        state.goldStreak += 1;
-        const mult = state.upgrades?.rhythm ? 2 : 1;
-        const gained = POT.score + COMBO.bonusPerStack * (state.combo - 1) * mult;
-        state.score += gained;
-        state.events.push(EVENT_FIRED);
-        if (state.combo >= 2) state.events.push(EVENT_COMBO);
-        floater(state, pot.x, pot.y - 30, state.combo > 1 ? `+${gained} x${state.combo} COMBO!` : `+${gained} FIRED!`, '#ffd166');
-        burst(state, pot.x, pot.y, '#ffd166', 16, 140);
-        if (state.combo >= 6 && !state.mpWave) {
-          state.mpWave = true;
-          state.masterpieces += 1;
-          state.score += MASTERPIECE.score;
-          state.events.push(EVENT_MASTERPIECE);
-          floater(state, KILN.x, KILN.y - KILN.radius - 44, `MASTERPIECE! +${MASTERPIECE.score}`, '#ffe9a8');
-          burst(state, KILN.x, KILN.y, '#ffe9a8', 42, 260);
-          state.shake = Math.max(state.shake, 10);
-          state.banner = 'MASTERPIECE POT! The kiln sings!';
-          state.bannerTime = 2.2;
-        }
+        registerPotFired(state, pot);
+        maybeMasterpiece(state);
       }
     }
   }
@@ -250,7 +168,7 @@ function draftCool(state) {
 }
 
 function stepDrafts(state, dt) {
-  const speed = DRAFT.speed + DRAFT.speedPerWave * (state.wave - 1);
+  const speed = (DRAFT.speed + DRAFT.speedPerWave * (state.wave - 1)) * state.difficulty.enemySpeed;
   for (const draft of state.drafts) {
     // Drafts drift toward the kiln to cool it; a cold touch on the keeper chills them both.
     const dx = KILN.x - draft.x; const dy = KILN.y - draft.y;
@@ -273,7 +191,7 @@ function stepDrafts(state, dt) {
 }
 
 function stepImps(state, dt) {
-  const speed = IMP.speed + IMP.speedPerWave * (state.wave - 1);
+  const speed = (IMP.speed + IMP.speedPerWave * (state.wave - 1)) * state.difficulty.enemySpeed;
   for (const imp of state.imps) {
     const dx = state.keeper.x - imp.x; const dy = state.keeper.y - imp.y;
     const d = Math.hypot(dx, dy) || 1;
@@ -287,44 +205,11 @@ function stepImps(state, dt) {
   state.imps = state.imps.filter((i) => i.active);
 }
 
-function stepFrosts(state, dt) {
-  const slow = state.upgrades?.frostbane ? 0.75 : 1;
-  const speed = (FROST.speed + FROST.speedPerWave * (state.wave - 1)) * slow;
-  for (const frost of state.frosts) {
-    const dx = state.keeper.x - frost.x; const dy = state.keeper.y - frost.y;
-    const d = Math.hypot(dx, dy) || 1;
-    const weave = Math.sin(state.time * FROST.weave + frost.phase) * 90;
-    frost.x += ((dx / d) - (dy / d) * weave / 200) * speed * dt;
-    frost.y += ((dy / d) + (dx / d) * weave / 200) * speed * dt;
-    if (d < frost.radius + KEEPER.radius) {
-      frost.active = false;
-      state.heat = Math.max(0, state.heat - 6);
-      hurtKeeper(state, 1, 'FROST WRAITH!');
-      burst(state, frost.x, frost.y, '#bfe9ff', 16, 170);
-    }
-  }
-  state.frosts = state.frosts.filter((f) => f.active);
-}
-
-function stepSurge(state, dt) {
-  if (state.wave >= SURGE.firstWave && !state.surgeDone && state.waveTime >= SURGE.atSeconds) {
-    state.surgeDone = true;
-    state.surgeLeft = SURGE.seconds;
-    state.banner = 'DRAFT SURGE! Hold the kiln!';
-    state.bannerTime = 2.4;
-    state.events.push(EVENT_SURGE);
-  }
-  if (state.surgeLeft > 0) {
-    state.surgeLeft -= dt;
-    state.draftTimer = Math.min(state.draftTimer, SURGE.draftInterval);
-  }
-}
-
 function stepCollisions(state) {
-  // Sparks hit drafts and imps.
+  // Sparks hit drafts, imps, wraiths and the boss.
   for (const spark of state.sparks) {
     for (const draft of state.drafts) {
-      if (draft.active && distance(spark.x, spark.y, draft.x, draft.y) < spark.radius + draft.radius) {
+      if (draft.active && spark.life > 0 && distance(spark.x, spark.y, draft.x, draft.y) < spark.radius + draft.radius) {
         spark.life = 0;
         draft.hp -= SPARK.damage;
         burst(state, draft.x, draft.y, '#ffb347', 8, 120);
@@ -337,7 +222,7 @@ function stepCollisions(state) {
       }
     }
     for (const imp of state.imps) {
-      if (imp.active && distance(spark.x, spark.y, imp.x, imp.y) < spark.radius + imp.radius) {
+      if (imp.active && spark.life > 0 && distance(spark.x, spark.y, imp.x, imp.y) < spark.radius + imp.radius) {
         spark.life = 0;
         imp.hp -= SPARK.damage;
         burst(state, imp.x, imp.y, '#ff7a2f', 8, 120);
@@ -349,8 +234,6 @@ function stepCollisions(state) {
         }
       }
     }
-  }
-  for (const spark of state.sparks) {
     for (const frost of state.frosts) {
       if (frost.active && spark.life > 0 && distance(spark.x, spark.y, frost.x, frost.y) < spark.radius + frost.radius) {
         spark.life = 0;
@@ -366,6 +249,11 @@ function stepCollisions(state) {
           state.items.push({ kind: KIND_EMBER, x: frost.x, y: frost.y, vx: 0, vy: 0, radius: EMBER.radius, active: true, bob: 0 });
         }
       }
+    }
+    if (state.boss && state.boss.active && spark.life > 0 && distance(spark.x, spark.y, state.boss.x, state.boss.y) < spark.radius + state.boss.radius) {
+      spark.life = 0;
+      const bonus = state.boss.kind === 'herald' && state.upgrades?.frostbane ? 1 : 0;
+      damageBoss(state, SPARK.damage + bonus);
     }
   }
   state.frosts = state.frosts.filter((f) => f.active);
@@ -424,19 +312,27 @@ function stepSpawning(state, dt) {
   }
 }
 
-function stepParticles(state, dt) {
-  for (const p of state.particles) {
-    p.x += p.vx * dt; p.y += p.vy * dt; p.vx *= 0.98; p.vy *= 0.98; p.life -= dt;
+/** Settle a fallen boss: pay it out, then victory (Herald) or the wave break (Golem). */
+function settleBoss(state) {
+  const boss = state.boss;
+  if (!boss || boss.active || boss.counted) return;
+  boss.counted = true;
+  state.kills += 1;
+  state.score += boss.scoreValue;
+  state.coldFront = false;
+  if (state.wave === 10 && !state.endless) {
+    state.won = true;
+    state.campaignDone = true;
+    state.events.push(EVENT_VICTORY);
+  } else {
+    state.waveClear = true;
+    state.events.push(EVENT_WAVE);
   }
-  state.particles = state.particles.filter((p) => p.life > 0);
-  for (const f of state.floaters) { f.y -= 34 * dt; f.life -= dt; }
-  state.floaters = state.floaters.filter((f) => f.life > 0);
-  if (state.shake > 0) state.shake = Math.max(0, state.shake - 40 * dt);
 }
 
 /** One fixed simulation step. `input.firing` throws a spark toward the mouse. */
 export function stepWorld(state, input, dt = STEP) {
-  if (state.over || state.waveClear) return state;
+  if (state.over || state.waveClear || state.won) return state;
   state.time += dt;
   state.waveTime += dt;
   if (input.vent && state.heat > HEAT.goldHigh) {
@@ -463,17 +359,20 @@ export function stepWorld(state, input, dt = STEP) {
   stepHeat(state, dt);
   stepDrafts(state, dt);
   stepImps(state, dt);
-  stepFrosts(state, dt);
+  stepFrosts(state, dt, hurtKeeper);
+  stepBoss(state, dt, { hurtKeeper, spawnFrost, spawnImp, spawnDraft });
   stepSurge(state, dt);
   if (state.bannerTime > 0) state.bannerTime -= dt;
   if (state.flash > 0) state.flash = Math.max(0, state.flash - dt);
   // Contextual hints for a first-time keeper.
-  if (state.hintStage === 0 && state.embers >= 1) { state.hintStage = 1; state.banner = 'Good! Embers raise HEAT - keep it in the GOLD zone'; state.bannerTime = 3; }
-  if (state.hintStage === 1 && state.potsFired >= 1) { state.hintStage = 2; state.banner = 'Pot fired! Chain pots without leaving GOLD for COMBO + MASTERPIECE'; state.bannerTime = 3.2; }
+  if (state.hintStage === 0 && state.embers >= 1) { state.hintStage = 1; state.banner = 'Good! Embers raise HEAT - keep it in the GOLD band'; state.bannerTime = 3; }
+  if (state.hintStage === 1 && state.potsFired >= 1) { state.hintStage = 2; state.banner = 'Pot fired! Pots fire inside the GOLD RING - chain them for COMBO'; state.bannerTime = 3.2; }
   stepCollisions(state);
+  settleBoss(state);
   stepSpawning(state, dt);
   stepParticles(state, dt);
-  if (state.waveTime >= WAVE_SECONDS) {
+  const bossAlive = state.boss && state.boss.active;
+  if (state.waveTime >= WAVE_SECONDS && !bossAlive) {
     state.waveClear = true;
     state.score += POT.waveBonus;
     state.events.push(EVENT_WAVE);
@@ -481,21 +380,32 @@ export function stepWorld(state, input, dt = STEP) {
   return state;
 }
 
-/** Open the next wave: fresh pots on the racks, wave counter up, timers reset. */
+/** Open the next wave: fresh pots, timers reset, and a boss on boss waves. */
 export function nextWave(state) {
   state.wave += 1;
   state.waveTime = 0;
   state.waveClear = false;
-  state.pots = RACKS.map((rack) => ({ x: rack.x, y: rack.y, progress: 0, fired: false }));
+  state.pots = createPots();
   state.draftTimer = 1.2;
   state.impTimer = 6;
   state.frostTimer = 7;
   state.surgeDone = false;
   state.surgeLeft = 0;
   state.mpWave = false;
+  state.rerollUsed = false;
+  state.coldFront = false;
   state.frosts = [];
-  state.banner = `Wave ${state.wave} - hotter, faster, colder...`;
-  state.bannerTime = 2.4;
+  state.boss = !state.endless && isBossWave(state.wave) ? createBoss(state) : null;
+  if (state.boss) {
+    state.banner = state.boss.kind === 'herald'
+      ? 'THE FROST HERALD COMES FOR THE KILN!'
+      : 'THE ASH GOLEM STIRS!';
+    state.bannerTime = 3;
+    state.events.push(EVENT_BOSS);
+  } else {
+    state.banner = `Wave ${state.wave} - hotter, faster, colder...`;
+    state.bannerTime = 2.4;
+  }
   state.heat = Math.min(100, state.heat + 8);
   return state;
 }
