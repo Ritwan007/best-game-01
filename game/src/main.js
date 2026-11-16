@@ -2,7 +2,7 @@
 // the fixed-step loop, and owns the four screens (title, play, upgrade, over).
 // ?shot=title|play|upgrade|end&seed=N renders one screenshot scene instead.
 import { FIELD, STEP } from './config.js';
-import { createWorld, stepWorld, nextWave, EVENT_OVER, EVENT_FIRED, EVENT_HIT, EVENT_VENT, EVENT_PICKUP, EVENT_SHOOT, EVENT_WAVE } from './world.js';
+import { createWorld, stepWorld, nextWave, EVENT_OVER, EVENT_FIRED, EVENT_HIT, EVENT_VENT, EVENT_PICKUP, EVENT_SHOOT, EVENT_WAVE, EVENT_COMBO, EVENT_MASTERPIECE, EVENT_SURGE, EVENT_DASH } from './world.js';
 import { emptyUpgrades, rollChoices } from './upgrades.js';
 import { createInput, attachInput, consumePress, clearPresses } from './input.js';
 import { drawWorld, drawTitle, drawUpgrade, drawOver, SCREEN_TITLE, SCREEN_PLAY, SCREEN_UPGRADE, SCREEN_OVER } from './render.js';
@@ -76,6 +76,10 @@ function handleEvents() {
     else if (event === EVENT_HIT) SOUNDS.hit(audio);
     else if (event === EVENT_FIRED) SOUNDS.fired(audio);
     else if (event === EVENT_VENT) SOUNDS.vent(audio);
+    else if (event === EVENT_COMBO) SOUNDS.combo(audio);
+    else if (event === EVENT_MASTERPIECE) SOUNDS.masterpiece(audio);
+    else if (event === EVENT_SURGE) SOUNDS.surge(audio);
+    else if (event === EVENT_DASH) SOUNDS.dash(audio);
     else if (event === EVENT_WAVE) openUpgrade();
     else if (event === EVENT_OVER) gameOver();
   }

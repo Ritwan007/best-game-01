@@ -42,6 +42,10 @@ export const SOUNDS = {
   wave(audio) { tone(audio, 392, 0.12, 'triangle', 0.12); setTimeout(() => tone(audio, 523, 0.12, 'triangle', 0.12), 100); setTimeout(() => tone(audio, 659, 0.2, 'triangle', 0.12), 200); },
   over(audio) { tone(audio, 330, 0.3, 'triangle', 0.14, 220); setTimeout(() => tone(audio, 220, 0.5, 'triangle', 0.14, 110), 260); },
   click(audio) { tone(audio, 880, 0.05, 'sine', 0.08); },
+  combo(audio) { tone(audio, 740, 0.1, 'triangle', 0.12, 1180); },
+  masterpiece(audio) { [523, 659, 784, 1046].forEach((f, i) => setTimeout(() => tone(audio, f, 0.22, 'triangle', 0.15), i * 90)); },
+  surge(audio) { tone(audio, 220, 0.3, 'sawtooth', 0.1, 440); setTimeout(() => tone(audio, 220, 0.3, 'sawtooth', 0.1, 440), 320); },
+  dash(audio) { tone(audio, 300, 0.14, 'sine', 0.09, 700); },
 };
 
 export function toggleMute(audio) {

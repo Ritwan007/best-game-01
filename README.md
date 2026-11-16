@@ -14,9 +14,17 @@ hit zero and the kiln dies; let it pass 95 and the kiln cracks unless you vent i
 - **1 / 2 / 3** — pick an upgrade after each 25-second wave
 - **M** — mute · **R** — restart after game over
 
-Score from embers (+10), shattered drafts (+15), imps (+25), fired pots (+50)
-and wave bonuses (+25). Three hearts; a heart is lost to a draft's chill, an
-imp's touch, a cold kiln, or a cracked one.
+Score from embers (+10), shattered drafts (+15), imps (+25), frost wraiths
+(+40), fired pots (+50) and wave bonuses (+25). **v2 additions:** chaining pots
+without leaving the gold zone builds a **combo** (each extra pot pays +25
+more); reaching combo x6 in a wave fires a **Masterpiece pot (+250)**; a
+**draft surge** hits mid-wave from wave 2; **frost wraiths** (wave 3+) weave
+fast at the keeper and drop an ember when shattered; dashing now grants
+**i-frames**; a goal banner and contextual hints teach the loop in the first
+seconds, and two embers wait beside the keeper at the start. Three hearts; a
+heart is lost to a draft's chill, an imp's or wraith's touch, a cold kiln, or
+a cracked one. 11 upgrades (new: Kiln Rhythm, Frostbane Sparks, Stoker's
+Craft).
 
 ## Run it
 

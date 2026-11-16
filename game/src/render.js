@@ -27,7 +27,11 @@ function text(ctx, str, x, y, size, colour, align = 'center', weight = '700') {
 }
 
 function drawYard(ctx, time) {
-  ctx.fillStyle = PALETTE.yard;
+  const sky = ctx.createLinearGradient(0, 0, 0, FIELD.height);
+  sky.addColorStop(0, '#1d1426');
+  sky.addColorStop(0.45, PALETTE.yard);
+  sky.addColorStop(1, '#3a2330');
+  ctx.fillStyle = sky;
   ctx.fillRect(0, 0, FIELD.width, FIELD.height);
   // Flagstones.
   ctx.strokeStyle = 'rgba(0,0,0,0.25)';
@@ -94,6 +98,17 @@ function drawKiln(ctx, state) {
   ctx.beginPath(); ctx.arc(0, 52, 30 + 8 * heatFrac, 0, Math.PI * 2); ctx.fill();
   ctx.fillStyle = '#fff3c4';
   ctx.beginPath(); ctx.arc(0, 52, 12 + 6 * heatFrac, 0, Math.PI * 2); ctx.fill();
+  // Animated flame tongues, flickering with heat.
+  const flick = Math.sin(state.time * 11) * 0.18 + Math.sin(state.time * 23 + 1.7) * 0.12;
+  ctx.fillStyle = zone === 'dying' ? 'rgba(127,212,255,0.7)' : 'rgba(255,170,40,0.85)';
+  for (const off of [-14, 0, 14]) {
+    const h = (26 + 30 * heatFrac) * (1 + flick + off * 0.004);
+    ctx.beginPath();
+    ctx.moveTo(off - 7, 58);
+    ctx.quadraticCurveTo(off, 58 - h * 0.6, off + Math.sin(state.time * 9 + off) * 3, 58 - h);
+    ctx.quadraticCurveTo(off, 58 - h * 0.5, off + 7, 58);
+    ctx.closePath(); ctx.fill();
+  }
   // Heat label over the kiln.
   text(ctx, `HEAT ${Math.round(state.heat)}`, 0, -KILN.radius - 40, 20, zone === 'gold' ? PALETTE.gold : PALETTE.cream);
   if (zone === 'gold') text(ctx, 'GOLD ZONE — POTS FIRING', 0, -KILN.radius - 62, 15, PALETTE.gold);
@@ -141,7 +156,8 @@ function drawKeeper(ctx, state, time) {
   const k = state.keeper;
   ctx.save();
   ctx.translate(k.x, k.y);
-  if (k.invulnerable > 0 && Math.floor(time * 12) % 2 === 0) ctx.globalAlpha = 0.45;
+  if (k.invulnerable > 0 && k.dashTime <= 0 && Math.floor(time * 12) % 2 === 0) ctx.globalAlpha = 0.45;
+  if (k.dashTime > 0) { ctx.strokeStyle = '#ffd166'; ctx.lineWidth = 3; ctx.beginPath(); ctx.arc(0, 0, 26, 0, Math.PI * 2); ctx.stroke(); text(ctx, 'DASH!', 0, -38, 13, '#ffd166'); }
   // Shadow.
   ctx.fillStyle = 'rgba(0,0,0,0.35)';
   ctx.beginPath(); ctx.ellipse(0, 18, 20, 7, 0, 0, Math.PI * 2); ctx.fill();
@@ -197,6 +213,24 @@ function drawFoes(ctx, state, time) {
     ctx.beginPath(); ctx.moveTo(-8, -imp.radius - 4); ctx.lineTo(-3, -imp.radius + 4); ctx.moveTo(8, -imp.radius - 4); ctx.lineTo(3, -imp.radius + 4); ctx.stroke();
     ctx.restore();
   }
+  for (const frost of state.frosts || []) {
+    ctx.save();
+    ctx.translate(frost.x, frost.y + Math.sin(time * 5 + frost.phase) * 3);
+    const fg = ctx.createRadialGradient(0, 0, 2, 0, 0, 30);
+    fg.addColorStop(0, 'rgba(191,233,255,0.95)');
+    fg.addColorStop(1, 'rgba(61,126,166,0.15)');
+    ctx.fillStyle = fg;
+    ctx.beginPath(); ctx.arc(0, 0, 24, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#eaf8ff';
+    ctx.beginPath(); ctx.arc(0, -2, 11, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#123';
+    ctx.beginPath(); ctx.arc(-4, -4, 2.2, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath(); ctx.arc(4, -4, 2.2, 0, Math.PI * 2); ctx.fill();
+    ctx.strokeStyle = '#bfe9ff'; ctx.lineWidth = 2;
+    for (const a of [0.4, 2.5, 4.6]) { ctx.beginPath(); ctx.moveTo(Math.cos(a) * 12, Math.sin(a) * 12); ctx.lineTo(Math.cos(a) * 20, Math.sin(a) * 20); ctx.stroke(); }
+    text(ctx, 'WRAITH', 0, -30, 11, '#bfe9ff');
+    ctx.restore();
+  }
 }
 
 function drawEmbers(ctx, state, time) {
@@ -239,7 +273,7 @@ function drawParticles(ctx, state) {
   ctx.globalAlpha = 1;
 }
 
-function drawHud(ctx, state) {
+function drawHud(ctx, state, time = 0) {
   // Top bar: score, wave, hearts, heat gauge.
   ctx.fillStyle = 'rgba(20,12,22,0.72)';
   roundRect(ctx, 16, 12, 560, 54, 10);
@@ -293,7 +327,31 @@ function drawHud(ctx, state) {
   ctx.fill();
   text(ctx, `WAVE ${state.wave} — ${Math.ceil(WAVE_SECONDS - state.waveTime)}s to the firing break`, FIELD.width / 2, FIELD.height - 48, 14, PALETTE.cream);
   // Controls hint, bottom left.
-  text(ctx, 'WASD move · mouse aim · click spark · SHIFT dash · SPACE vent', 16, FIELD.height - 20, 13, 'rgba(247,234,215,0.75)', 'left');
+  text(ctx, 'WASD move · mouse aim · click spark · SHIFT dash (i-frames!) · SPACE vent', 16, FIELD.height - 20, 13, 'rgba(247,234,215,0.75)', 'left');
+  // Combo meter under the top bar.
+  if (state.combo > 1) {
+    ctx.fillStyle = 'rgba(20,12,22,0.72)';
+    roundRect(ctx, 16, 74, 300, 34, 8); ctx.fill();
+    text(ctx, `COMBO x${state.combo}  - pots pay +${25 * (state.combo - 1)}`, 28, 92, 17, PALETTE.gold, 'left');
+  }
+  if (state.masterpieces > 0) text(ctx, `MASTERPIECES ${state.masterpieces}`, 330, 92, 16, '#ffe9a8', 'left');
+  // Surge warning.
+  if (state.surgeLeft > 0) {
+    ctx.globalAlpha = 0.65 + 0.35 * Math.sin(time * 10);
+    text(ctx, '!! DRAFT SURGE !!', FIELD.width / 2, 92, 30, '#7fd4ff');
+    ctx.globalAlpha = 1;
+  }
+  // Goal / hint banner.
+  if (state.bannerTime > 0 && state.banner) {
+    ctx.fillStyle = 'rgba(20,12,22,0.8)';
+    roundRect(ctx, FIELD.width / 2 - 390, 118, 780, 38, 10); ctx.fill();
+    text(ctx, state.banner, FIELD.width / 2, 138, 17, PALETTE.cream);
+  }
+  // Hit flash.
+  if (state.flash > 0) {
+    ctx.fillStyle = `rgba(255,40,60,${(state.flash * 0.55).toFixed(3)})`;
+    ctx.fillRect(0, 0, FIELD.width, FIELD.height);
+  }
 }
 
 export function drawWorld(ctx, state, time) {
@@ -309,7 +367,7 @@ export function drawWorld(ctx, state, time) {
   drawKeeper(ctx, state, time);
   drawParticles(ctx, state);
   ctx.restore();
-  drawHud(ctx, state);
+  drawHud(ctx, state, time);
 }
 
 function overlay(ctx) {
@@ -343,7 +401,7 @@ export function drawTitle(ctx, state, time) {
   ctx.globalAlpha = pulse;
   text(ctx, 'PRESS ENTER OR CLICK TO START', 640, 540, 24, PALETTE.gold);
   ctx.globalAlpha = 1;
-  text(ctx, '3 hearts · waves of 25 seconds · upgrades after every wave', 640, 580, 15, 'rgba(247,234,215,0.7)');
+  text(ctx, 'NEW: frost wraiths · draft surges · combos · masterpiece pots', 640, 580, 15, PALETTE.gold);
 }
 
 export function drawUpgrade(ctx, state, choices) {
@@ -390,7 +448,8 @@ export function drawOver(ctx, state) {
   text(ctx, 'THE KILN HAS GONE COLD', 640, 220, 36, PALETTE.cold);
   text(ctx, `FINAL SCORE  ${state.score}`, 640, 300, 30, PALETTE.gold);
   text(ctx, `Waves survived ${state.wave} · Pots fired ${state.potsFired}`, 640, 350, 20, PALETTE.cream);
-  text(ctx, `Embers gathered ${state.embers} · Drafts shattered ${state.kills}`, 640, 382, 20, PALETTE.cream);
+  text(ctx, `Embers gathered ${state.embers} · Foes shattered ${state.kills}`, 640, 382, 20, PALETTE.cream);
+  text(ctx, `Best combo x${state.comboMax || 0} · Masterpieces ${state.masterpieces || 0}`, 640, 414, 20, '#ffe9a8');
   text(ctx, 'PRESS R OR ENTER TO FIRE AGAIN', 640, 470, 22, PALETTE.gold);
   text(ctx, 'The yard remembers every firing. Beat your score!', 640, 520, 16, 'rgba(247,234,215,0.7)');
 }

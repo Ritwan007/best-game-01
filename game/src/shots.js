@@ -31,7 +31,7 @@ function autopilot(state) {
     my = KILN.y + 120 - keeper.y;
   }
   // Flee any draft or imp that gets close.
-  for (const foe of [...state.drafts, ...state.imps]) {
+  for (const foe of [...state.drafts, ...state.imps, ...(state.frosts || [])]) {
     const d = Math.hypot(foe.x - keeper.x, foe.y - keeper.y);
     if (d < 130) {
       mx += ((keeper.x - foe.x) / (d || 1)) * 220;
@@ -47,7 +47,7 @@ function autopilot(state) {
   // Aim at the nearest foe and fire when one is in range.
   let foe = null;
   let foeBest = 420;
-  for (const other of [...state.drafts, ...state.imps]) {
+  for (const other of [...state.drafts, ...state.imps, ...(state.frosts || [])]) {
     const d = Math.hypot(other.x - keeper.x, other.y - keeper.y);
     if (d < foeBest) { foeBest = d; foe = other; }
   }
@@ -75,6 +75,12 @@ function runFor(state, seconds, pilot) {
  * `shot` is title | play | upgrade | end; `seed` fixes the world.
  */
 export function shotScene(shot, seed = 1) {
+  const scene = buildScene(shot, seed);
+  scene.state.shake = 0; // screenshots must be byte-stable: no random shake offset
+  return scene;
+}
+
+function buildScene(shot, seed = 1) {
   if (shot === 'title') {
     const state = createWorld(seed);
     runFor(state, START_SECONDS, autopilot);

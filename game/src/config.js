@@ -57,6 +57,20 @@ export const DRAFT = {
   coolOnTouch: 14,
 };
 
+export const FROST = {
+  radius: 14,
+  speed: 168,
+  speedPerWave: 6,
+  interval: 7.5,
+  firstWave: 3,
+  weave: 2.6,
+};
+
+export const COMBO = { bonusPerStack: 25, maxStack: 8 };
+export const MASTERPIECE = { streak: 3, score: 250 };
+export const SURGE = { atSeconds: 12, seconds: 4, firstWave: 2, draftInterval: 0.55 };
+export const PARTICLE_CAP = 420;
+
 export const IMP = {
   radius: 15,
   speed: 118,
